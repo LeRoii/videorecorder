@@ -254,7 +254,7 @@ int main()
 			{
 				writer->release();
 			}
-			writer = new VideoWriter(filePath, CV_FOURCC('M','J','P','G'), 10, cv::Size(1920, 1080));
+			writer = new VideoWriter(filePath, CV_FOURCC('M','J','P','G'), 8, cv::Size(1920, 1080));
 		}
 
 		if (!cap.read(img)) {
