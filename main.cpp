@@ -192,42 +192,42 @@ int main()
 	int cnt = 0;
 	// int screenshotCnt = 1;
 
-	std::cout <<"checkAvailable:" << checkAvailable() << "MB" << endl;
+	// std::cout <<"checkAvailable:" << checkAvailable() << "MB" << endl;
 
-	std::vector<string> fileNames;
-	showAllFiles("/home/nxsd/savedvideo/", fileNames);
-	std::sort(fileNames.begin(), fileNames.end());
-	Remove("/home/nxsd/savedvideo/"+fileNames[0]);
-	Remove("/home/nxsd/savedvideo/"+fileNames[1]);
-	return 0;
+	// std::vector<string> fileNames;
+	// showAllFiles("/home/nxsd/savedvideo/", fileNames);
+	// std::sort(fileNames.begin(), fileNames.end());
+	// Remove("/home/nxsd/savedvideo/"+fileNames[0]);
+	// Remove("/home/nxsd/savedvideo/"+fileNames[1]);
+	// return 0;
 
 	
-	// std::vector<string> fileNames;
-	// getFileNames("/home/nxsd/savedvideo/", fileNames);
-	std::cout <<"before sort"<<endl;
-	for (const auto &ph : fileNames) {
-		std::cout << ph << "\n";
-	}
-	std::cout <<"after sort"<<endl;
-	std::sort(fileNames.begin(), fileNames.end());
+	// // std::vector<string> fileNames;
+	// // getFileNames("/home/nxsd/savedvideo/", fileNames);
+	// std::cout <<"before sort"<<endl;
+	// for (const auto &ph : fileNames) {
+	// 	std::cout << ph << "\n";
+	// }
+	// std::cout <<"after sort"<<endl;
+	// std::sort(fileNames.begin(), fileNames.end());
 
-	for (const auto &ph : fileNames) {
-		std::cout << ph << "\n";
-	}
+	// for (const auto &ph : fileNames) {
+	// 	std::cout << ph << "\n";
+	// }
 
-	return 0;
+	// return 0;
 
 
 	std::string filePath = "out.avi";
 	
 
-	std::time_t tt = std::chrono::system_clock::to_time_t (std::chrono::system_clock::now());
-	std::stringstream ss;
-	ss << std::put_time(std::localtime(&tt), "%F-%H-%M-%S");
-	std::string str = "/home/nxsd/savedvideo/"+ss.str()+".avi";
-	ss.str("");
-	ss << str;
-	ss >> filePath;
+	// std::time_t tt = std::chrono::system_clock::to_time_t (std::chrono::system_clock::now());
+	// std::stringstream ss;
+	// ss << std::put_time(std::localtime(&tt), "%F-%H-%M-%S");
+	// std::string str = "/home/nxsd/savedvideo/"+ss.str()+".avi";
+	// ss.str("");
+	// ss << str;
+	// ss >> filePath;
 
 	cv::VideoWriter *writer = nullptr;
 	// cv::VideoWriter videoWriter(filePath, CV_FOURCC('M','J','P','G'), 10, cv::Size(1920, 1080));
