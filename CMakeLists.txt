@@ -9,3 +9,14 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -O2 -pthread -fopenmp")
 
 add_executable(videoCapture main.cpp)
 target_link_libraries( videoCapture ${OpenCV_LIBS} )
+
+IF( UNIX )
+    find_package(PkgConfig)
+    pkg_search_module( CSERIAL REQUIRED cserial )
+ENDIF( UNIX )
+
+add_compile_options(-std=c++11 )
+
+add_executable( cserial-example example_full.cpp )
+target_link_libraries( cserial-example ${CSERIAL_LIBRARIES} )
+
