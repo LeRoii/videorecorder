@@ -36,6 +36,11 @@
 #include <stdlib.h>
 #include <signal.h>
 #include <poll.h>
+#include <chrono>
+#include <vector>
+#include <thread>
+#include <mutex>
+
 
 #include <dirent.h>
 #include <sys/statfs.h>
@@ -44,19 +49,144 @@
 #include <sys/timeb.h>
 #include <signal.h>
 
+#include "test.pb.h"
+
+
 #include "NvEglRenderer.h"
 #include "NvUtils.h"
 #include "NvCudaProc.h"
 #include "nvbuf_utils.h"
 
 #include "camera_v4l2_cuda.h"
+#include "CSerialPort/SerialPort.h"
+#include "CSerialPort/SerialPortInfo.h"
 
 
 
+static int CROP_TOP = 283;
+static int CROP_LEFT = 640;
 
 static bool quit = false;
 
+std::mutex serialMtx;
+
+int openedFile = -1;
+
+std::string dataRootPath = "/home/nvidia/savedvideo/";
+std::string dataFullPath;
+
+bool writevideo = true;
+
+context_t ctx;
+
 using namespace std;
+
+uint64_t createtimestamp()
+{
+	auto now = std::chrono::system_clock::now();
+    auto duration = now.time_since_epoch();
+    uint64_t* ptr=reinterpret_cast<uint64_t*>(&duration);
+	uint64_t  tmp=*ptr;
+	return tmp;
+}
+
+using namespace itas109;
+class mySlot : public has_slots<>
+{
+public:
+    mySlot(CSerialPort *sp)
+    {
+        recLen = -1;
+        p_sp = sp;
+
+        std::string pbfilepath;
+        std::time_t tt = std::chrono::system_clock::to_time_t (std::chrono::system_clock::now());
+        std::stringstream ss;
+        ss << std::put_time(std::localtime(&tt), "%F-%H-%M-%S");
+        std::string str = dataFullPath.c_str()+ss.str()+".db";
+        ss.str("");
+        ss << str;
+        ss >> pbfilepath;  
+        serialOutput.open(pbfilepath, std::ios::out | std::ios::binary);
+        if(!serialOutput.is_open())
+        {
+            printf("pb file open failed");
+        }
+
+        msgcnt = 0;
+    };
+
+    void OnSendMessage()
+    {
+        static pb::msg_bag bag;
+        // read
+        recLen = p_sp->readAllData(serialdata);
+        if (recLen > 0)
+        {
+            printf("recLen:%d\n", recLen);
+            for(int i=0;i<recLen;i++)
+            {
+                printf( "  0x%02X\n", serialdata[ i ]);
+            }
+
+            serialMtx.lock();
+            pmsg = bag.add_msgs();
+            serialMtx.unlock();
+
+            pmsg->set_timestamp(createtimestamp());
+            pmsg->set_type(pb::serial_msg_Msg_type_GPS);
+            pmsg->set_len(recLen);
+            // char pbdata[90]={i%256};
+            pmsg->set_body(serialdata,recLen);
+
+            msgcnt++;
+
+            if(msgcnt == 200*60*30)
+            {
+                msgcnt = 0;
+                auto str=bag.SerializeAsString();
+                uint64_t len=str.size();
+                char* start=reinterpret_cast<char*>(&len);
+                serialOutput.write(start, 8);
+                serialOutput.write(str.c_str(), str.length());
+                serialOutput.close();
+                bag.clear_msgs();
+
+                std::string pbfilepath;
+                std::time_t tt = std::chrono::system_clock::to_time_t (std::chrono::system_clock::now());
+                std::stringstream ss;
+                ss << std::put_time(std::localtime(&tt), "%F-%H-%M-%S");
+                std::string filenamestr = dataFullPath.c_str()+ss.str()+".db";
+                ss.str("");
+                ss << filenamestr;
+                ss >> pbfilepath;  
+                serialOutput.open(pbfilepath, std::ios::out | std::ios::binary);
+                printf("pb bag end, open a new pb file");
+
+            }
+
+        }
+    };
+
+private:
+    mySlot(){};
+public:
+    ~mySlot(){serialOutput.close();}
+
+private:
+    CSerialPort *p_sp;
+
+    char serialdata[1024];
+    int recLen;
+    pb::serial_msg* pmsg;
+    
+
+    std::fstream serialOutput;
+    int msgcnt;
+   
+    
+};
+
 
 static void
 print_usage(void)
@@ -132,13 +262,13 @@ unsigned long checkAvailable()
 	unsigned long long blocksize                = diskInfo.f_bsize;	//每个block里包含的字节数
 	unsigned long long totalsize                = blocksize * diskInfo.f_blocks; 	//总的字节数，f_blocks为block的数目
 
-	printf("Total_size = %llu B                 = %llu KB = %llu MB = %llu GB\n", 
-		                                            totalsize, totalsize>>10, totalsize>>20, totalsize>>30);
+	// printf("Total_size = %llu B                 = %llu KB = %llu MB = %llu GB\n", 
+	// 	                                            totalsize, totalsize>>10, totalsize>>20, totalsize>>30);
 	
 	unsigned long long freeDisk                 = diskInfo.f_bfree * blocksize;	//剩余空间的大小
 	unsigned long long availableDisk            = diskInfo.f_bavail * blocksize; 	//可用空间大小
-	printf("Disk_free = %llu MB                 = %llu GB\nDisk_available = %llu MB = %llu GB\n", 
-		                                            freeDisk>>20, freeDisk>>30, availableDisk>>20, availableDisk>>30);
+	// printf("Disk_free = %llu MB                 = %llu GB\nDisk_available = %llu MB = %llu GB\n", 
+	// 	                                            freeDisk>>20, freeDisk>>30, availableDisk>>20, availableDisk>>30);
 	return availableDisk>>20;
 
 }
@@ -293,7 +423,7 @@ set_defaults(context_t * ctx)
 {
     memset(ctx, 0, sizeof(context_t));
 
-    ctx->cam_devname = "/dev/video0";
+    ctx->cam_devname = "/dev/video3";
     ctx->cam_fd = -1;
     ctx->cam_pixfmt = V4L2_PIX_FMT_YUYV;
     ctx->cam_w = 1920;
@@ -631,7 +761,21 @@ prepare_buffers(context_t * ctx)
         }
     }
 
+    input_params.colorFormat = get_nvbuff_color_fmt(ctx->cam_pixfmt);
+    input_params.width = 640;
+    input_params.height = 514;
+    input_params.nvbuf_tag = NvBufferTag_NONE;
+    if (-1 == NvBufferCreateEx(&ctx->store_dmabuf_fd, &input_params))
+            ERROR_RETURN("Failed to create store_dmabuf_fd");
+
+    if (-1 == NvBufferMemMap(ctx->store_dmabuf_fd, 0, NvBufferMem_Read_Write,
+                        (void**)&ctx->pStoreStart))
+                ERROR_RETURN("Failed to map buffer");
+
+
     input_params.colorFormat = get_nvbuff_color_fmt(V4L2_PIX_FMT_YUV420M);
+    input_params.width = 640;
+    input_params.height = 514;
     input_params.nvbuf_tag = NvBufferTag_NONE;
     // Create Render buffer
     if (-1 == NvBufferCreateEx(&ctx->render_dmabuf_fd, &input_params))
@@ -666,135 +810,6 @@ start_stream(context_t * ctx)
     return true;
 }
 
-static void
-signal_handle(int signum)
-{
-    printf("Quit due to exit command from user!\n");
-    quit = true;
-}
-
-static bool
-start_capture(context_t * ctx)
-{
-    struct sigaction sig_action;
-    struct pollfd fds[1];
-    NvBufferTransformParams transParams;
-
-    // Ensure a clean shutdown if user types <ctrl+c>
-    sig_action.sa_handler = signal_handle;
-    sigemptyset(&sig_action.sa_mask);
-    sig_action.sa_flags = 0;
-    sigaction(SIGINT, &sig_action, NULL);
-
-    // Init the NvBufferTransformParams
-    memset(&transParams, 0, sizeof(transParams));
-    transParams.transform_flag = NVBUFFER_TRANSFORM_FILTER;
-    transParams.transform_filter = NvBufferTransform_Filter_Smart;
-
-    // Enable render profiling information
-    ctx->renderer->enableProfiling();
-
-    fds[0].fd = ctx->cam_fd;
-    fds[0].events = POLLIN;
-
-    int file;
-
-    file = open(ctx->cam_file, O_CREAT | O_WRONLY | O_APPEND | O_TRUNC,
-            S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH);
-
-    while (poll(fds, 1, 5000) > 0 && !quit)
-    {
-        if (fds[0].revents & POLLIN) {
-            struct v4l2_buffer v4l2_buf;
-
-            // Dequeue camera buff
-            memset(&v4l2_buf, 0, sizeof(v4l2_buf));
-            v4l2_buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-            if (ctx->capture_dmabuf)
-                v4l2_buf.memory = V4L2_MEMORY_DMABUF;
-            else
-                v4l2_buf.memory = V4L2_MEMORY_MMAP;
-            if (ioctl(ctx->cam_fd, VIDIOC_DQBUF, &v4l2_buf) < 0)
-                ERROR_RETURN("Failed to dequeue camera buff: %s (%d)",
-                        strerror(errno), errno);
-
-            ctx->frame++;
-
-            // if (ctx->frame == ctx->save_n_frame)
-                // save_frame_to_file(ctx, &v4l2_buf);
-
-            if (-1 == file)
-                ERROR_RETURN("Failed to open file for frame saving");
-
-            // if (-1 == write(file, ctx->g_buff[v4l2_buf.index].start,
-            //             ctx->g_buff[v4l2_buf.index].size))
-            // {
-            //     close(file);
-            //     ERROR_RETURN("Failed to write frame into file");
-            // }
-
-            // printf("frame:%d, ctx->g_buff[v4l2_buf.index].size:%d\n", ctx->frame, ctx->g_buff[v4l2_buf.index].size);
-            // for(int i =0;i<ctx->g_buff[v4l2_buf.index].size/2;i++){
-            //     unsigned char tmp= ctx->g_buff[v4l2_buf.index].start[i*2];
-            //     ctx->g_buff[v4l2_buf.index].start[i*2]=ctx->g_buff[v4l2_buf.index].start[i*2+1];
-            //     ctx->g_buff[v4l2_buf.index].start[i*2+1]=tmp;
-
-            // }
-            printf("line 1:\n");
-            for(int i=0; i<1920*2;i++)
-                printf("%#x,", ctx->g_buff[v4l2_buf.index].start[i]);
-
-            printf("line 2:\n");
-            for(int i=0; i<1920*2;i++)
-                printf("%#x,", ctx->g_buff[v4l2_buf.index].start[1920*2+i]);
-
-            printf("line 4:\n");
-            for(int i=0; i<1920*2;i++)
-                printf("%#x,", ctx->g_buff[v4l2_buf.index].start[1920*2*3+i]);
-            
-
-            if(ctx->frame >20)
-             return 0;
-
-            // return 0;
-
-            printf("ctx->frame:%d\n", ctx->frame);
-
-            {
-                if (ctx->capture_dmabuf) {
-                    // Cache sync for VIC operation
-                    NvBufferMemSyncForDevice(ctx->g_buff[v4l2_buf.index].dmabuff_fd, 0,
-                            (void**)&ctx->g_buff[v4l2_buf.index].start);
-                } else {
-                    Raw2NvBuffer(ctx->g_buff[v4l2_buf.index].start, 0,
-                             ctx->cam_w, ctx->cam_h, ctx->g_buff[v4l2_buf.index].dmabuff_fd);
-                }
-
-                // Convert the camera buffer from YUV422 to YUV420P
-                if (-1 == NvBufferTransform(ctx->g_buff[v4l2_buf.index].dmabuff_fd, ctx->render_dmabuf_fd,
-                            &transParams))
-                    ERROR_RETURN("Failed to convert the buffer");
-
-            }
-
-            ctx->renderer->render(ctx->render_dmabuf_fd);
-
-            // Enqueue camera buff
-            if (ioctl(ctx->cam_fd, VIDIOC_QBUF, &v4l2_buf))
-                ERROR_RETURN("Failed to queue camera buffers: %s (%d)",
-                        strerror(errno), errno);
-        }
-    }
-
-    // Print profiling information when streaming stops.
-    ctx->renderer->printProfilingStats();
-
-    if (ctx->cam_pixfmt == V4L2_PIX_FMT_MJPEG)
-        delete ctx->jpegdec;
-
-    return true;
-}
-
 static bool
 stop_stream(context_t * ctx)
 {
@@ -810,228 +825,11 @@ stop_stream(context_t * ctx)
     return true;
 }
 
-int
-main(int argc, char *argv[])
+
+static int cleanup()
 {
-    // std::string folderpath = "./CMakeFiles";
-    // if(access(folderpath.c_str(), F_OK) == 0)
-    // {
-    //     printf("tmp exist\n");
-    // }
-
-    // if(mkdir("tmp", 0777) == 0)
-    // {
-    //     printf("tmp mkdir ok\n");
-    // }
-
-    // return 0;
-
-    cv::Mat im = cv::imread("../1.png");
-    cv::Mat imargb,imyuv_I420,imyuv_YUYV;
-    cv::resize(im, im, cv::Size(1920,1080));
-    cv::cvtColor(im, imargb, cv::COLOR_RGB2RGBA);
-    cv::cvtColor(imargb, imyuv_I420, cv::COLOR_RGBA2YUV_I420);
-
-    cv::imwrite("imyuv.png", imyuv_I420);
-
-    printf("imyuv channel:%d,row:%d, cols:%d\n", imyuv_I420.channels(), imyuv_I420.rows, imyuv_I420.cols);
-
-    // int buflen = 1920*1080*1.5;
-    // unsigned char* yuvbuf = new unsigned char[buflen];
-    // memcpy(yuvbuf, imyuv.data, buflen*sizeof(unsigned char));
-
-    // cv::cvtColor(imyuv, im, cv::COLOR_YUV2RGB_I420);
-    // cv::imshow("1", im);
-    // cv::waitKey(0);
-
-    NvBufferCreateParams input_params = {0};
-    input_params.payloadType = NvBufferPayload_SurfArray;
-    // input_params.payloadType = NvBufferPayload_MemHandle;
-    input_params.width = 1920;
-    input_params.height = 1080;
-    input_params.layout = NvBufferLayout_Pitch;
-    // input_params.colorFormat = NvBufferColorFormat_ABGR32;
-    input_params.colorFormat = NvBufferColorFormat_ARGB32;
-    // input_params.colorFormat = NvBufferColorFormat_YUV420;
-    // input_params.colorFormat = NvBufferColorFormat_YUYV;
-    // input_params.colorFormat = NvBufferColorFormat_UYVY;
-    input_params.nvbuf_tag = NvBufferTag_NONE;
-    int fd, renderbuf, yuyvFd;
-    if (-1 == NvBufferCreateEx(&fd, &input_params))
-            ERROR_RETURN("Failed to create NvBuffer");
-
-    input_params.width = 1920;
-    input_params.height = 1080;
-    input_params.colorFormat = NvBufferColorFormat_YUV420;
-    // input_params.colorFormat = NvBufferColorFormat_NV12;
-    // input_params.colorFormat = NvBufferColorFormat_ARGB32;
-    // input_params.colorFormat = NvBufferColorFormat_NV21;
-    // input_params.colorFormat = NvBufferColorFormat_UYVY;
-    // input_params.colorFormat = NvBufferColorFormat_YUYV;
-    input_params.nvbuf_tag = NvBufferTag_NONE;
-    if (-1 == NvBufferCreateEx(&renderbuf, &input_params))
-        ERROR_RETURN("Failed to create NvBuffer");
-
-    input_params.colorFormat = NvBufferColorFormat_YUYV;
-    if (-1 == NvBufferCreateEx(&yuyvFd, &input_params))
-        ERROR_RETURN("Failed to create yuyvFd NvBuffer");
-
-    NvBufferParams params = {0};
-    // if (-1 == NvBufferGetParams(fd, &params))
-    //         ERROR_RETURN("Failed to get NvBuffer parameters");
-    // printf("fd num_planes:%d, memsize:%d, nv_buffer_size:%d,\
-    // width[0]:%d,width[1]:%d,width[2]:%d, height[0]:%d, height[1]:%d, height[2]:%d\n", \
-    // params.num_planes, params.memsize, params.nv_buffer_size,\
-    // params.width[0], params.width[1], params.width[2], params.height[0], params.height[1], params.height[2]);
-
-    // if (-1 == NvBufferGetParams(renderbuf, &params))
-    //         ERROR_RETURN("Failed to get NvBuffer parameters");
-    // printf("renderbuf num_planes:%d, memsize:%d, nv_buffer_size:%d,\
-    // width[0]:%d,width[1]:%d,width[2]:%d, height[0]:%d, height[1]:%d, height[2]:%d\n", \
-    // params.num_planes, params.memsize, params.nv_buffer_size,\
-    // params.width[0], params.width[1], params.width[2], params.height[0], params.height[1], params.height[2]);
-
-    if (-1 == NvBufferGetParams(yuyvFd, &params))
-            ERROR_RETURN("Failed to get NvBuffer parameters");
-    printf("renderbuf num_planes:%d, memsize:%d, nv_buffer_size:%d,\
-    width[0]:%d,width[1]:%d,width[2]:%d, height[0]:%d, height[1]:%d, height[2]:%d\n", \
-    params.num_planes, params.memsize, params.nv_buffer_size,\
-    params.width[0], params.width[1], params.width[2], params.height[0], params.height[1], params.height[2]);
-
-
-
-
-    // return 0;
-
-    int ret = Raw2NvBuffer(imargb.data, 0, 1920, 1080, fd);
-    printf("ret:%d\n", ret);
-
-    NvBufferTransformParams transParams;
-    memset(&transParams, 0, sizeof(transParams));
-    transParams.transform_flag = NVBUFFER_TRANSFORM_FILTER;
-    transParams.transform_filter = NvBufferTransform_Filter_Smart;
-
-    if (-1 == NvBufferTransform(fd, renderbuf,
-                            &transParams))
-                    ERROR_RETURN("Failed to convert the buffer");
-
-    if (-1 == NvBufferTransform(renderbuf, yuyvFd,
-                            &transParams))
-                    ERROR_RETURN("Failed to convert the yuyvFd buffer");
-
-    unsigned char * start;
-    unsigned int bufsize = 1920*1080*2;
-    if (-1 == NvBufferMemMap(yuyvFd, 0, NvBufferMem_Read_Write,
-                        (void**)&start))
-                ERROR_RETURN("Failed to map buffer");
-    int openedfile = open("1.yuv", O_CREAT | O_WRONLY | O_APPEND | O_TRUNC,
-            S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH);
-
-    for(int i=0;i<10;i++)
-    {
-        start[i] = i;
-    }
-    if (-1 == write(openedfile, start,bufsize))
-    {
-        close(openedfile);
-        ERROR_RETURN("Failed to write frame into file");
-    }
-
-
-    /***** read/recover using opencv *****/
-    /*****nvbuffer 2 cv mat,rgba, ok*****/
-    // cv::Mat mt = cv::Mat(1080,1920,CV_8UC4);
-    // NvBuffer2Raw(fd, 0, 1920,1080,mt.data);
-    // cv::imshow("1", mt);
-    // cv::waitKey(0);
-    /***** end nvbuffer 2 cv mat,rgba*****/
-
-    /*****nnvbuffer 2 cv mat,yuv420 to rgb*****/
-    // int buflen = 1920*1080*2;
-    // unsigned char* yuvbuf = new unsigned char[buflen];
-    // cv::Mat mt = cv::Mat(1620,1920,CV_8UC1);
-    // ret = NvBuffer2Raw(renderbuf, 0, 1920,1080, mt.data);
-    // printf("NvBuffer2Raw ret:%d\n", ret);
-    // ret = NvBuffer2Raw(renderbuf, 2, 960,540,mt.data+1920*1080);
-    // // printf("NvBuffer2Raw ret:%d\n", ret);
-    // ret = NvBuffer2Raw(renderbuf, 1, 960,540,mt.data+1920*1080+960*540);
-    // // cv::Mat mt = cv::Mat(1080,1920,CV_8UC3, yuvbuf);
-    // // printf("NvBuffer2Raw ret:%d\n", ret);
-    // cv::Mat mtshow;
-    // cv::cvtColor(mt, mtshow, cv::COLOR_YUV2RGB_I420);
-    // cv::imwrite("mtshow.png", mtshow);
-    // cv::imwrite("mt.png", mt);
-    // cv::imshow("1", mt);
-    // cv::waitKey(0);
-    /***** end nnvbuffer 2 cv mat,yuv420 to rgb*****/
-
-    /*****nnvbuffer 2 cv mat, yuyv to rgb*****/
-    // cv::Mat mt = cv::Mat(1080,1920,CV_8UC2);
-    // ret = NvBuffer2Raw(yuyvFd, 0, 1920,1080, mt.data);
-    // printf("NvBuffer2Raw ret:%d\n", ret);
-    // cv::Mat mtshow;
-    // cv::cvtColor(mt, mtshow, cv::COLOR_YUV2RGB_UYVY);
-    // cv::imwrite("mtshow.png", mtshow);
-    // cv::imwrite("mt.png", mt);
-
-    // return 0;
-    /***** end nnvbuffer 2 cv mat, yuyv to rgb*****/
-    
-    /***** end nnvbuffer 2 cv mat, yuyv to rgb*****/
-
-    /*****read saved file and convert yuyv to rgb*****/
-    int img = open("1.yuv", O_RDONLY);
-    if(img == -1)
-        ERROR_RETURN("Failed to open file for rendering");
-
-    int imgbufsize = 1920*1080*2;
-    unsigned char *imgbuf = (unsigned char*)malloc(imgbufsize);
-    int cnt = read(img, imgbuf, imgbufsize);
-    printf("read %d bytes\n", cnt);
-    for(int i=0;i<10;i++)
-    {
-        printf("[%d] byte:%#x,", i, imgbuf[i]);
-    }
-    printf("\n");
-
-    cv::Mat mt = cv::Mat(1080,1920,CV_8UC2, imgbuf);
-    cv::Mat mtshow;
-    cv::cvtColor(mt, mtshow, cv::COLOR_YUV2RGB_UYVY);
-    cv::imwrite("mtshow.png", mtshow);
-    /*****end read saved file and convert yuyv to rgb*****/
-
-    auto renderer = NvEglRenderer::createEglRenderer("renderer0", 640, 480, 0, 0);
-    renderer->setFPS(30);
-    
-    while(1) 
-        renderer->render(renderbuf);
-    return 0;
-
-    context_t ctx;
-    int error = 0;
-
-    set_defaults(&ctx);
-
-    // CHECK_ERROR(parse_cmdline(&ctx, argc, argv), cleanup,
-    //         "Invalid options specified");
-
-    CHECK_ERROR(init_components(&ctx), cleanup,
-            "Failed to initialize v4l2 components");
-
-    CHECK_ERROR(prepare_buffers(&ctx), cleanup,
-            "Failed to prepare v4l2 buffs");
-
-    CHECK_ERROR(start_stream(&ctx), cleanup,
-            "Failed to start streaming");
-
-    CHECK_ERROR(start_capture(&ctx), cleanup,
-            "Failed to start capturing")
-
-    CHECK_ERROR(stop_stream(&ctx), cleanup,
-            "Failed to stop streaming");
-
-cleanup:
-    if (ctx.cam_fd > 0)
+    stop_stream(&ctx);
+    if(ctx.cam_fd > 0)
         close(ctx.cam_fd);
 
     if (ctx.renderer != NULL)
@@ -1053,10 +851,346 @@ cleanup:
 
     NvBufferDestroy(ctx.render_dmabuf_fd);
 
-    if (error)
-        printf("App run failed\n");
-    else
-        printf("App run was successful\n");
+    // if (error)
+    //     printf("App run failed\n");
+    // else
+        printf("cleanup end\n");
 
-    return -error;
+}
+
+
+static void
+signal_handle(int signum)
+{
+    close(openedFile);
+    printf("Quit due to exit command from user!\n");
+    quit = true;
+    cleanup();
+}
+
+static bool
+start_capture(context_t * ctx, int core)
+{
+    // for(auto &str:dirs)
+    // {
+    // std::cout<<str<<std::endl;
+    // }
+
+    struct sigaction sig_action;
+    struct pollfd fds[1];
+    NvBufferTransformParams transParams;
+
+    // Ensure a clean shutdown if user types <ctrl+c>
+    sig_action.sa_handler = signal_handle;
+    sigemptyset(&sig_action.sa_mask);
+    sig_action.sa_flags = 0;
+    sigaction(SIGINT, &sig_action, NULL);
+
+    // Init the NvBufferTransformParams
+    memset(&transParams, 0, sizeof(transParams));
+    NvBufferRect srcRect, dstRect;
+    srcRect.top = CROP_TOP;
+    srcRect.left = CROP_LEFT;
+    srcRect.width = 640;
+    srcRect.height = 514;
+
+    dstRect.top = 0;
+    dstRect.left = 0;
+    dstRect.width = 640;
+    dstRect.height = 514;
+
+    // transParams.transform_flag = NVBUFFER_TRANSFORM_FILTER;
+    transParams.transform_flag = NVBUFFER_TRANSFORM_CROP_SRC;
+    transParams.transform_filter = NvBufferTransform_Filter_Smart;
+    transParams.src_rect = srcRect;
+    transParams.dst_rect = dstRect;
+
+    // Enable render profiling information
+    // ctx->renderer->enableProfiling();
+
+    fds[0].fd = ctx->cam_fd;
+    fds[0].events = POLLIN;
+
+    
+    std::string filePath;
+    // file = open(ctx->cam_file, O_CREAT | O_WRONLY | O_APPEND | O_TRUNC,
+    //         S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH);
+
+    while (poll(fds, 1, 5000) > 0 && !quit)
+    {
+        if (fds[0].revents & POLLIN) {
+            struct v4l2_buffer v4l2_buf;
+
+            // Dequeue camera buff
+            memset(&v4l2_buf, 0, sizeof(v4l2_buf));
+            v4l2_buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+            if (ctx->capture_dmabuf)
+                v4l2_buf.memory = V4L2_MEMORY_DMABUF;
+            else
+                v4l2_buf.memory = V4L2_MEMORY_MMAP;
+            if (ioctl(ctx->cam_fd, VIDIOC_DQBUF, &v4l2_buf) < 0)
+                ERROR_RETURN("Failed to dequeue camera buff: %s (%d)",
+                        strerror(errno), errno);
+
+            auto stamp = createtimestamp();
+
+            unsigned char* ptr=reinterpret_cast<unsigned char*>(&stamp);
+
+            // for(int i=0;i<8;i++)
+            // {
+            //     printf("%#x, ", ptr[i]);
+            // }
+
+            ctx->frame++;
+
+            if (-1 == NvBufferTransform(ctx->g_buff[v4l2_buf.index].dmabuff_fd, ctx->store_dmabuf_fd,
+                            &transParams))
+                    ERROR_RETURN("Failed to convert the buffer");
+
+            memcpy(ctx->pStoreStart, ptr, 8);
+
+            // if (ctx->frame == ctx->save_n_frame)
+                // save_frame_to_file(ctx, &v4l2_buf);
+
+            // if (-1 == file)
+            //     ERROR_RETURN("Failed to open file for frame saving");
+
+            // write file
+            if(checkAvailable() < 150)
+            {
+                std::vector<string> fileNames;
+                showAllFiles(dataFullPath.c_str(), fileNames);
+                std::sort(fileNames.begin(), fileNames.end());
+                Remove(dataFullPath.c_str()+fileNames[0]);
+                Remove(dataFullPath.c_str()+fileNames[1]);
+            }
+            // for(int i=0;i<8;i++)
+            // {
+            //     printf("%#x, ", ctx->pStoreStart[i]);
+            // }
+            // printf("\n");
+
+            // printf("ctx->frame:%d\n", ctx->frame);
+
+            if(writevideo)
+            {
+                if(openedFile == -1 || GetFileSize(filePath) > 104857600*5 )
+                {
+                    printf("open new file, openedFile =%d\n", openedFile);
+                    std::time_t tt = std::chrono::system_clock::to_time_t (std::chrono::system_clock::now());
+                    std::stringstream ss;
+                    ss << std::put_time(std::localtime(&tt), "%F-%H-%M-%S");
+                    std::string str = dataFullPath.c_str()+ss.str()+".yuv";
+                    ss.str("");
+                    ss << str;
+                    ss >> filePath;  
+
+                    if(openedFile != -1)
+                    {
+                        close(openedFile);
+                    }
+
+                    openedFile = open(filePath.c_str(), O_CREAT | O_WRONLY | O_APPEND | O_TRUNC,
+                        S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH);
+
+                }
+
+                int writesize = 640*514*2;
+                
+                if (-1 == write(openedFile, ctx->pStoreStart,
+                            writesize))
+                {
+                    printf("write failed\n");
+                    close(openedFile);
+                    ERROR_RETURN("Failed to write frame into file");
+                }
+            }
+            else
+            {
+                close(openedFile);
+                openedFile = -1;
+                // printf("close, openedFile:%d\n", openedFile);
+            }
+            // close(openedFile);
+
+            // printf("frame:%d, ctx->g_buff[v4l2_buf.index].size:%d\n", ctx->frame, ctx->g_buff[v4l2_buf.index].size);
+            // for(int i =0;i<ctx->g_buff[v4l2_buf.index].size/2;i++){
+            //     unsigned char tmp= ctx->g_buff[v4l2_buf.index].start[i*2];
+            //     ctx->g_buff[v4l2_buf.index].start[i*2]=ctx->g_buff[v4l2_buf.index].start[i*2+1];
+            //     ctx->g_buff[v4l2_buf.index].start[i*2+1]=tmp;
+
+            // }
+            
+            // if(ctx->frame >5)
+            // {
+            //     close(openedFile);
+            //     printf("return\n");
+            //  return 0;
+            // }
+
+            {
+                if (ctx->capture_dmabuf) {
+                    // Cache sync for VIC operation
+                    NvBufferMemSyncForDevice(ctx->g_buff[v4l2_buf.index].dmabuff_fd, 0,
+                            (void**)&ctx->g_buff[v4l2_buf.index].start);
+                } else {
+                    Raw2NvBuffer(ctx->g_buff[v4l2_buf.index].start, 0,
+                             ctx->cam_w, ctx->cam_h, ctx->g_buff[v4l2_buf.index].dmabuff_fd);
+                }
+            }
+
+
+            // Enqueue camera buff
+            if (ioctl(ctx->cam_fd, VIDIOC_QBUF, &v4l2_buf))
+                ERROR_RETURN("Failed to queue camera buffers: %s (%d)",
+                        strerror(errno), errno);
+        }
+    }
+
+    // Print profiling information when streaming stops.
+    // ctx->renderer->printProfilingStats();
+
+    if (ctx->cam_pixfmt == V4L2_PIX_FMT_MJPEG)
+        delete ctx->jpegdec;
+
+    return true;
+}
+
+
+int
+main(int argc, char *argv[])
+{
+    if(argc > 2)
+    {
+        CROP_TOP = stoi(argv[1]);
+        CROP_LEFT = stoi(argv[2]);
+    }
+
+    // make a new directory
+    std::vector<string> fileNames, dirs;
+    showAllFiles(dataRootPath.c_str(), fileNames);
+    for(auto &str:fileNames)
+    {
+        if(str.find(".") == std::string::npos)
+            dirs.push_back(str);
+    }
+
+    int maxfoldername = 0;
+    for(auto &str:dirs)
+    {
+        if(stoi(str) > maxfoldername)
+        {
+            maxfoldername = stoi(str);
+        }
+        cout<<str<<endl;
+    }
+
+    // std::sort(dirs.begin(), dirs.end());
+    // dataFullPath
+    dataFullPath = dataRootPath + std::to_string(maxfoldername+1)+"/";
+    //    auto newfolderpath = dataRootPath+newfolder;
+    if(mkdir(dataFullPath.c_str(), 0777) == 0)
+    {
+        printf("mk new dir ok\n");
+    }
+
+
+    size_t index = -1;
+    std::string portName;
+    vector<SerialPortInfo> m_availablePortsList;
+    CSerialPort sp1, sp0;
+    mySlot receive1(&sp1);
+    mySlot receive0(&sp0);
+
+    sp1.init("/dev/ttyTHS1", // windows:COM1 Linux:/dev/ttyS0
+                itas109::BaudRate460800, 
+                itas109::ParityNone, 
+                itas109::DataBits8, 
+                itas109::StopOne
+                );
+
+    sp0.init("/dev/ttyTHS0", // windows:COM1 Linux:/dev/ttyS0
+                itas109::BaudRate460800, 
+                itas109::ParityNone, 
+                itas109::DataBits8, 
+                itas109::StopOne
+                );
+    
+    sp1.open();
+    sp0.open();
+
+    if (sp1.isOpened())
+    {
+        std::cout << "open /dev/ttyTHS1"  << " success" << std::endl;
+    }
+    else
+    {
+        std::cout << "open /dev/ttyTHS1"  << " failed" << std::endl;
+    }
+
+    if (sp0.isOpened())
+    {
+        std::cout << "open /dev/ttyTHS0"  << " success" << std::endl;
+    }
+    else
+    {
+        std::cout << "open /dev/ttyTHS0"  << " failed" << std::endl;
+    }
+
+    sp1.readReady.connect(&receive1, &mySlot::OnSendMessage);
+    sp0.readReady.connect(&receive0, &mySlot::OnSendMessage);
+
+    int error = 0;
+
+    set_defaults(&ctx);
+
+    init_components(&ctx);
+    prepare_buffers(&ctx);
+    start_stream(&ctx);
+
+    int core = 0;
+    std::thread videoth = std::thread(start_capture, &ctx, core);
+    
+    videoth.detach();
+
+    while(1 && !quit)
+    {
+        char c = getchar();
+        // printf("1111\n");
+        if(c == 'f')
+        {
+            writevideo = false;
+            printf("%c\n", c);
+        }
+        else if(c == 't')
+        {
+            std::vector<string> fileNames, dirs;
+            showAllFiles(dataRootPath.c_str(), fileNames);
+            for(auto &str:fileNames)
+            {
+                if(str.find(".") == std::string::npos)
+                    dirs.push_back(str);
+            }
+
+            int maxfoldername = 0;
+            for(auto &str:dirs)
+            {
+                if(stoi(str) > maxfoldername)
+                {
+                    maxfoldername = stoi(str);
+                }
+                cout<<str<<endl;
+            }
+
+            // dataFullPath
+            dataFullPath = dataRootPath + std::to_string(maxfoldername+1)+"/";
+            //    auto newfolderpath = dataRootPath+newfolder;
+            if(mkdir(dataFullPath.c_str(), 0777) == 0)
+            {
+                printf("mkdir ok\n");
+            }
+            writevideo = true;
+        }
+            
+    }
 }

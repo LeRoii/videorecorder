@@ -93,6 +93,9 @@ typedef struct
     // Verbose option
     bool enable_verbose;
 
+    int store_dmabuf_fd;
+    unsigned char * pStoreStart;
+
 } context_t;
 
 // Correlate v4l2 pixel format and NvBuffer color format
