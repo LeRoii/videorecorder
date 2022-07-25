@@ -27,32 +27,14 @@
 
 /**
  */
- size_t GetFileSize(const std::string& file_name)
- {
-	std::ifstream in(file_name.c_str());
-	in.seekg(0, std::ios::end);
-	size_t size = in.tellg();
-	in.close();
-	return size; //单位是：Byte
-}
 
-char check_xor(const char *buff ,const int len)
-{
-    char res = 0;
-    int i;
-    for ( i = 0; i <len ; i++)
-    {
-        res ^= buff[i];
-    }
-    return res;
-}
 
 int main( int argc, char** argv ){
     c_serial_port_t* m_port;
     c_serial_control_lines_t m_lines;
     int status;
     int bytes_read;
-    int buff_size = 200;
+     int buff_size = 200;
     uint8_t data[ 255 ];
     uint8_t buff[ buff_size ];
     int data_length;
@@ -60,9 +42,7 @@ int main( int argc, char** argv ){
     //int ptr = 0;
     int lenth = 0;
     int index = 0;
-    int find_ptr = 0;
-    int lastpack = 1;
-    //int write_num = 0;
+    int write_num = 0;
     bool first = true;
     int x;
 
@@ -112,10 +92,10 @@ int main( int argc, char** argv ){
      * Set various serial port settings.  These are the default.
      */
     // c_serial_set_baud_rate( m_port, CSERIAL_BAUD_115200 );
-     c_serial_set_baud_rate( m_port, CSERIAL_BAUD_460800 );
+     c_serial_set_baud_rate( m_port, CSERIAL_BAUD_115200 );
     c_serial_set_data_bits( m_port, CSERIAL_BITS_8 );
     c_serial_set_stop_bits( m_port, CSERIAL_STOP_BITS_1 );
-    c_serial_set_parity( m_port, CSERIAL_PARITY_NONE );
+    c_serial_set_parity( m_port, CSERIAL_PARITY_EVEN );
     c_serial_set_flow_control( m_port, CSERIAL_FLOW_NONE );
 
     printf( "Baud rate is %d\n", c_serial_get_baud_rate( m_port ) );
@@ -146,7 +126,7 @@ int main( int argc, char** argv ){
     std::time_t tt = std::chrono::system_clock::to_time_t (std::chrono::system_clock::now());
     std::stringstream ss;
     ss << std::put_time(std::localtime(&tt), "%F-%H-%M-%S");
-    std::string str = "/home/nx/savedvideo/"+ss.str()+".txt";
+    std::string str = "/home/nxsd/savedvideo/"+ss.str()+".txt";
     ss.str("");
     ss << str;
     ss >> filePath;
@@ -169,86 +149,53 @@ int main( int argc, char** argv ){
             break;
         }
 
-        for( int j = 0; j < data_length; j++ )
-        {
-            printf( "    0x%02X \n", data[ j ]);
-        }
-
        // memset(buff,0,buff_size);
         
         printf( "Got %d bytes of data\n", data_length );
-        if ((data_length == 1) || !((data[0]==0xCC&&data[1]==0x55)))
-        {
-            for( x = 0; x < data_length; x++ )
+        for( x = 0; x < data_length; x++ ){
+            printf( "    0x%02X (ASCII: %c)\n", data[ x ], data[ x ] );
+            if(data[x] == 0xCC && data[x+1] == 0x55)
             {
-            buff[write_ptr++] = data[x];
-            if (write_ptr == buff_size)
-             {
-                write_ptr = 0;
-            }
-            }
-            continue;
-        }
-        
-      for( x = 0; x < data_length; x++ )
-      {
-        printf( "    0x%02X (ASCII: %c)\n", data[ x ], data[ x ] );
-        buff[write_ptr++] = data[x];
-        if (write_ptr == buff_size)
-        {
-            write_ptr = 0;
-        }
-        
-      }
-  
-    //find  cc 55 in buff
-    loop: find_ptr++ ;
-    if(find_ptr == buff_size)
-    {
-        find_ptr = 0;
-    }
-    if(!(buff[find_ptr]==0xCC && buff[find_ptr+1] == 0x55))
-    {
-        goto loop;
-    }
+                //index = x;
+                //write = !write;
+                lenth = write_num;
+                write_num = 0;
 
-         printf("find_ptr:%d\n",find_ptr);
-        lenth = find_ptr-index;
-        printf("lenth:%d  index:%d\n",lenth,index);
-        if (lenth<0)
-        {
-            lenth += buff_size;
-        }
-        
-        if (first)
-                {
-                    first = false;
-                    index = find_ptr;
-                    continue;
-                }
-        else
-        {
-            for (int i = index; i < (index+lenth); i++)
+            if (first)
             {
-            if (i == buff_size)
+                first = false;
+                index = x;
+            }
+            else
+            {
+                for (int i = index; i < lenth; i++)
+                {
+                if (i == buff_size)
                 {
                     i=0;
                 }
-            out<<std::hex<< short(buff[i])<<" ";
-            //printf("111\n");
-            }
-           
-            index = find_ptr;
-            out<<std::endl; 
-            find_ptr++ ;
-            if(find_ptr == buff_size)
-            {
-                find_ptr = 0;
-            }
-            continue;
-        }
-    
+                out<<std::hex<< short(buff[i])<<" ";
+                index = x;
+                }
 
+                out<<std::endl; 
+            }
+
+
+            }
+            buff[write_ptr++] = data[x];
+              
+            write_num++;
+             printf( " write_ptr:%d  --- 0x%02X x:%d\n",write_ptr, buff[ x ],x );
+            
+            if (write_ptr == buff_size)
+            {
+                write_ptr = 0;
+            }
+
+            
+            
+        }
         printf( "Serial line state: CD: %d CTS: %d DSR: %d DTR: %d RTS: %d RI: %d\n",
             m_lines.cd, 
             m_lines.cts,
