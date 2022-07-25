@@ -10,8 +10,11 @@
 #include <stdlib.h>
 #include <sys/stat.h>
 #include <sys/statfs.h>
-
-
+#include <sys/time.h>
+#include <iomanip>
+#include <unistd.h>
+#include <sys/timeb.h>
+#include <signal.h>
 
 
 using namespace cv;
@@ -164,89 +167,90 @@ void keboardListener()
 {
 	while(1)
     {
-        cin>>command;
+        // ci                                                                                                                                                       n>>command;
         cout<<"command:"<<command<<endl;
     }
+}
+
+char* log_Time(void){
+	struct tm* ptm;
+	struct timeb stTimeb;
+	static char szTime[19];
+
+	ftime(&stTimeb);
+	ptm = localtime(&stTimeb.time);
+	sprintf(szTime, "%02d-%02d %02d:%02d:%02d.%03d",
+			ptm->tm_mon+1, ptm->tm_mday, ptm->tm_hour, ptm->tm_min ,ptm->tm_sec, stTimeb.millitm);
+	szTime[18] = 0;
+	return szTime;
+}
+
+void signalHandler(int signo){
+	switch(signo){
+		case SIGALRM:
+			printf("[%s]\n", log_Time());
+			printf("Caught the SIGALRM signal!\n");
+			break;
+	}
 }
 
 int main()
 {
 	// VideoCapture cap(0);
-	std::cout<<cv::getBuildInformation()<<std::endl;
-	VideoCapture cap(" v4l2src device=/dev/video0 ! video/x-raw, format=UYVY, width=1920, height=1080, framerate=30/1! videoconvert ! video/x-raw, format=BGR!  appsink", cv::CAP_GSTREAMER);
+	// std::cout<<cv::getBuildInformation()<<std::endl;
+	VideoCapture cap(" v4l2src device=/dev/video0 ! video/x-raw, pixelformat=MJPEG, width=1920, height=1080, framerate=30/1! videoconvert ! video/x-raw, format=BGR!  appsink max-buffers=1 drop=false sync=false", cv::CAP_GSTREAMER);
+	// cv::VideoCapture cap("rtspsrc location=rtsp://admin:abcd1234@192.168.1.123 latency=0 !rtph264depay ! h264parse ! omxh264dec ! videoconvert ! appsink max-buffers=1 drop=true sync=false", cv::CAP_GSTREAMER);
 	// cap.release();
 	// cap = VideoCapture(0);
 	//gst_testsink.open("appsrc ! queue ! videoconvert ! video/x-raw, format=RGBA ! nvvidconv ! nvoverlaysink ", cv::CAP_GSTREAMER, 0, 3, cv::Size(1280, 720));
 	cv::Mat img;
-
-	printf("is opened:%d\n", cap.isOpened());
+	// cap.set(cv::CAP_PROP_GSTREAMER_QUEUE_LENGTH, 0);
 	
-
+	printf("is opened:%d, CAP_PROP_GSTREAMER_QUEUE_LENGTH:%f\n", cap.isOpened(), cap.get(cv::CAP_PROP_GSTREAMER_QUEUE_LENGTH));
+	
 	double fps=0;
 
 	// cap.set(cv::CAP_PROP_FRAME_WIDTH,1280);
 	// cap.set(cv::CAP_PROP_FRAME_HEIGHT,720);
-	//cap.set(cv::CAP_PROP_FPS,30);
+	// cv::VideoWriter test;
+	// int fourcc = test.fourcc('H', '2', '6', '4');
+	// cap.set(cv::CAP_PROP_FPS,30);
+	// cap.set(cv::CAP_PROP_FOURCC, fourcc);
+	cap.set(cv::CAP_PROP_BUFFERSIZE, 1000);
 
 	// thread keyboardListenerTh(keboardListener);
 	int cnt = 0;
-	// int screenshotCnt = 1;
-
-	// std::cout <<"checkAvailable:" << checkAvailable() << "MB" << endl;
-
-	// std::vector<string> fileNames;
-	// showAllFiles("/home/nxsd/savedvideo/", fileNames);
-	// std::sort(fileNames.begin(), fileNames.end());
-	// Remove("/home/nxsd/savedvideo/"+fileNames[0]);
-	// Remove("/home/nxsd/savedvideo/"+fileNames[1]);
-	// return 0;
-
-	
-	// // std::vector<string> fileNames;
-	// // getFileNames("/home/nxsd/savedvideo/", fileNames);
-	// std::cout <<"before sort"<<endl;
-	// for (const auto &ph : fileNames) {
-	// 	std::cout << ph << "\n";
-	// }
-	// std::cout <<"after sort"<<endl;
-	// std::sort(fileNames.begin(), fileNames.end());
-
-	// for (const auto &ph : fileNames) {
-	// 	std::cout << ph << "\n";
-	// }
-
-	// return 0;
-
-
 	std::string filePath = "out.avi";
-	
-
-	// std::time_t tt = std::chrono::system_clock::to_time_t (std::chrono::system_clock::now());
-	// std::stringstream ss;
-	// ss << std::put_time(std::localtime(&tt), "%F-%H-%M-%S");
-	// std::string str = "/home/nxsd/savedvideo/"+ss.str()+".avi";
-	// ss.str("");
-	// ss << str;
-	// ss >> filePath;
-
 	cv::VideoWriter *writer = nullptr;
-	// cv::VideoWriter videoWriter(filePath, CV_FOURCC('M','J','P','G'), 10, cv::Size(1920, 1080));
+
+	signal(SIGALRM, signalHandler);
+	struct itimerval new_value, old_value;
+	new_value.it_value.tv_sec = 0;
+	new_value.it_value.tv_usec = 1;
+	new_value.it_interval.tv_sec = 0;
+	new_value.it_interval.tv_usec = 1000*33;
+	setitimer(ITIMER_REAL, &new_value, &old_value);
+
+	// namedWindow("FullScreen", CV_WINDOW_NORMAL);
+	// 	setWindowProperty("FullScreen", CV_WND_PROP_FULLSCREEN, CV_WINDOW_FULLSCREEN);
+		
+
 	while(true)
 	{
 		if(checkAvailable() < 150)
 		{
 			std::vector<string> fileNames;
-			showAllFiles("/home/nxsd/savedvideo/", fileNames);
+			showAllFiles("/home/nx/savedvideo/", fileNames);
 			std::sort(fileNames.begin(), fileNames.end());
-			Remove("/home/nxsd/savedvideo/"+fileNames[0]);
-			Remove("/home/nxsd/savedvideo/"+fileNames[1]);
+			Remove("/home/nx/savedvideo/"+fileNames[0]);
+			Remove("/home/nx/savedvideo/"+fileNames[1]);
 		}
-		if(writer == nullptr || GetFileSize(filePath) > 104857600 )
+		if(writer == nullptr || GetFileSize(filePath) > 104857600*3 )
 		{
 			std::time_t tt = std::chrono::system_clock::to_time_t (std::chrono::system_clock::now());
 			std::stringstream ss;
 			ss << std::put_time(std::localtime(&tt), "%F-%H-%M-%S");
-			std::string str = "/home/nxsd/savedvideo/"+ss.str()+".avi";
+			std::string str = "/home/nx/savedvideo/"+ss.str()+".avi";
 			ss.str("");
 			ss << str;
 			ss >> filePath;
@@ -254,33 +258,21 @@ int main()
 			{
 				writer->release();
 			}
-			writer = new VideoWriter(filePath, CV_FOURCC('M','J','P','G'), 8, cv::Size(1920, 1080));
+			writer = new VideoWriter(filePath, CV_FOURCC('M','J','P','G'),  30, cv::Size(1920, 1080));
 		}
 
-		if (!cap.read(img)) {
+		if (!cap.grab()) {
        		std::cout<<"Capture read error"<<std::endl;
-       		break;
+       		return 0;;
    		}
-		   printf("is opened:show%d\n\n", img.channels());
-		//    cv::cvtColor(img, img, cv::COLOR_YUV2RGB_UYVY);
-		// imshow("CamShow",img);
+		cap.retrieve(img);
 		writer->write(img);
-		// imwrite("frame.png",img);
-		// if(command == "p")
-		// {
-		// 	string filename;
-		// 	std::stringstream StrStm;
-		// 	StrStm<<screenshotCnt++;
-		// 	StrStm>>filename;
-		// 	imwrite("img"+filename+".png",img);
-		// 	command = "";
-		// }
 		 
 		fps = cap.get(cv::CAP_PROP_FPS);
 		cout<<"FPS:"<<fps<<"cnt:"<<cnt++<<endl;
 		
 
-		waitKey(1);
+		cv::waitKey(1);
 	}
 
 	cap.release();

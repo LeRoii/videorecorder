@@ -1,0 +1,3 @@
+/home/nvidia/wzp/videorecorder/record/build/CMakeFiles/rebuild_cache.dir
+/home/nvidia/wzp/videorecorder/record/build/CMakeFiles/main.dir
+/home/nvidia/wzp/videorecorder/record/build/CMakeFiles/edit_cache.dir

@@ -1,0 +1,23 @@
+// file: test.proto
+syntax = "proto3";
+
+package pb;
+option optimize_for = LITE_RUNTIME;
+
+message serial_msg {
+  
+  uint64 timestamp = 1;
+  enum Msg_type{
+  	GPS=0;
+  	POSE=1;
+  	VIEWANGLE=2;
+  	OTHER=3;
+  }
+  Msg_type type = 2;
+  uint32 len = 3;
+  bytes body = 4;  
+}
+
+message msg_bag {
+	repeated serial_msg msgs=1;
+}
