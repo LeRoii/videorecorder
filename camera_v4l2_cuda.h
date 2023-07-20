@@ -93,8 +93,8 @@ typedef struct
     // Verbose option
     bool enable_verbose;
 
-    int store_dmabuf_fd;
-    unsigned char * pStoreStart;
+    int store_dmabuf_fd[20];
+    unsigned char * pStoreStart[20];
 
 } context_t;
 

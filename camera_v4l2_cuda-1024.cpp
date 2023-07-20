@@ -41,7 +41,7 @@
 #include <thread>
 #include <mutex>
 #include <pthread.h>
-
+#include <queue>
 
 #include <dirent.h>
 #include <sys/statfs.h>
@@ -70,10 +70,10 @@
 
 
 
-const int PB_GPS_MSG_SIZE = 200 * 10 * 1;
-const int PB_SSDS_MSG_SIZE = 50 * 10 * 1;
+const int PB_GPS_MSG_SIZE = 200 * 1000 * 1;
+const int PB_SSDS_MSG_SIZE = 200 * 1000 * 1;
 
-bool writevideo = false;
+bool writevideo = true;
 
 std::string dataRootPath = "/home/nx/savedvideo/";
 std::string dataFullPath;
@@ -83,6 +83,14 @@ pb::msg_bag gpsbagbk;
 pb::msg_bag ssdsbagbk;
 
 using namespace std;
+
+void set_affinity(int core)
+{
+    cpu_set_t mask;
+    CPU_ZERO(&mask);
+    CPU_SET(core, &mask);
+    pthread_setaffinity_np(pthread_self(), sizeof(mask), &mask);
+}
 
 void showAllFiles( const char * dir_name, std::vector<std::string> &files)
 {
@@ -248,15 +256,17 @@ int pbAddSSDSMsg(pb::msg_bag &bag, uint64_t timestamp,  unsigned char* msg, int 
 
 int onRcvGPSMsg(unsigned char* msg, int len)
 {
-	static unsigned char buf[200]={0x55,0xaa, 0x0};
+	// static unsigned char buf[200]={0x55,0xaa, 0x0};
+    static unsigned char buf[200]={0xA1, 0xFD, 0x02, 0x02, 0xDF}; //$GPFPD
 	static unsigned char st=0;
 	static int bi=0;
 	static unsigned char bsum=0;
     static uint64_t tstamp;
+    static unsigned long msg_sum=0;
 
 	int retsum=0;
 
-	if(len==140)
+	if(len==18)
 	{
 		//auto tstamp=createtimestamp();
 
@@ -269,7 +279,10 @@ int onRcvGPSMsg(unsigned char* msg, int len)
 			if(msg[139]==sum)
             {
                 if(writevideo)
-                    pbAddGPSMsg(gpsbag, tstamp, msg, len);
+                    pbAddGPSMsg(gpsbag, tstamp, msg, 140);
+                    if((msg_sum++)%1000==0)
+                        printf("gps sys status :%#x, long: %f, lat: %f, alt: %f\n", buf[135], (*reinterpret_cast<int*>(&buf[78]))*1e-7,(*reinterpret_cast<int*>(&buf[82]))*1e-7, (*reinterpret_cast<float*>(&buf[86])));
+                    
                 return 1;
             }
 			
@@ -311,7 +324,9 @@ int onRcvGPSMsg(unsigned char* msg, int len)
                         buf[bi]=msg[i];
 						++retsum;
                         if(writevideo)
-                            pbAddGPSMsg(gpsbag, tstamp, msg, len);
+                            pbAddGPSMsg(gpsbag, tstamp, buf, 140);
+                        if((msg_sum++)%1000==0)
+                            printf("gps sys status :%#x, long: %f, lat: %f, alt: %f\n", buf[135], (*reinterpret_cast<int*>(&buf[78]))*1e-7,(*reinterpret_cast<int*>(&buf[82]))*1e-7, (*reinterpret_cast<float*>(&buf[86])));
                     }
 					st=0;
 					bi=0;
@@ -327,48 +342,87 @@ int onRcvGPSMsg(unsigned char* msg, int len)
 	
 }
 
+float fromuchartofloat(unsigned char* src)
+{
+    union{
+        unsigned char uc[4];
+        float f;
+    }foo;
+    foo.uc[0]=src[3];
+    foo.uc[1]=src[2];
+    foo.uc[2]=src[1];
+    foo.uc[3]=src[0];
+    return foo.f;
+}
+
+#define PI (3.1415926)
+
 int onRcvSSDSMsg(unsigned char* msg, int len)
 {
     // printf("onRcvSSDSMsg\n");
-    static unsigned char buf[200]={0xCC,0x55, 0x0};
+    //static unsigned char buf[200]={0xCC,0x55, 0x0};
+    static unsigned char buf[200]={0xAA};
 	static unsigned char st=0;
 	static int bi=0;
 	static unsigned char bsum=0;
     static uint64_t tstamp;
+    static unsigned long msg_sum=0;
 
 	int retsum=0;
 
     static pb::msg_bag bag;
 
-	if(len==20)
+	if(len==50)
 	{
 		//auto tstamp=createtimestamp();
 
         tstamp=createtimestamp();
-		if((msg[0]==0xCC)&&(msg[1]==0x55))
+		if(msg[0]==0xAA)
 		{
 			unsigned char sum=0;
-			for(int i=2;i <19; ++i)
+			for(int i=1;i <49; ++i)
 				sum+=msg[i];
-			if(msg[19]==sum)
+			if(msg[49]==sum)
             {
                 if(writevideo)
                     pbAddSSDSMsg(bag, tstamp, msg, len);
-                if(msg[4] == 1)
-                {
-                    printf("write video start\n");
-                    mknewfolder();
-                    writevideo = true; 
-                }
-                else if(msg[4] == 0)
-                {
-                    if(writevideo == true)
-                    {
-                        bag.Swap(&ssdsbagbk);
-                        gpsbag.Swap(&gpsbagbk);
-                    }
-                    writevideo = false; 
-                }
+                // if((msg[2]==6)&&(msg[4] == 1))
+                // {
+                //     printf("write video start, sensor %d viewangle:%f\n", msg[3], fromuchartofloat(&msg[5]));
+                //     mknewfolder();
+                //     writevideo = true; 
+                // }
+                // else if((msg[2]==6)&&(msg[4] == 0))
+                // {
+
+                //     printf("write video stop, sensor %d viewangle:%f\n", msg[3], fromuchartofloat(&msg[5]));
+                //     if(writevideo == true)
+                //     {
+                //         bag.Swap(&ssdsbagbk);
+                //         gpsbag.Swap(&gpsbagbk);
+                //     }
+                //     writevideo = false; 
+                // }
+                // else if(msg[2]==8)
+                // {
+                //     if((msg_sum++)%1000==0)
+                //         printf("az %f, el %f\n",fromuchartofloat(&msg[3])*180./PI, fromuchartofloat(&msg[7])*180./PI);
+                // }                }
+                // else if(msg[2]==1)
+                // {
+                //     if((msg_sum++)%50==0)
+                //         printf("gyro az %f, el %f\n",fromuchartofloat(&msg[3])*6, fromuchartofloat(&msg[7])*6);
+                // }
+                // else if(msg[2]==2)
+                // {
+                //     if((msg_sum++)%100==0)
+                //         printf("current ia %f, ie %f, oa %f, oe %f\n",fromuchartofloat(&msg[3]), fromuchartofloat(&msg[7]),fromuchartofloat(&msg[11]), fromuchartofloat(&msg[15]));
+                // }
+                // else if(msg[2]==3)
+                // {
+                //     if((msg_sum++)%100==0)
+                //         printf("rd ia %f, ie %f, oa %f, oe %f\n",fromuchartofloat(&msg[3]), fromuchartofloat(&msg[7]),fromuchartofloat(&msg[11]), fromuchartofloat(&msg[15]));
+                // }
                 
                 return 1;
             }
@@ -382,51 +436,73 @@ int onRcvSSDSMsg(unsigned char* msg, int len)
 			switch(st)
 			{
 				case 0:
-					if(msg[i]==0xCC)
+					if(msg[i]==0xAA)
 					{
-						st=1;
+						st=2;
 						bi=1;
                         tstamp = createtimestamp();
 					}
 					break;
-				case 1:
-					if(msg[i]==0x55)
-					{
-						st=2;
-						bi=2;
-					}
-					else
-						st=0;					
-					break;
+				// case 1:
+				// 	if(msg[i]==0x55)
+				// 	{
+				// 		st=2;
+				// 		bi=2;
+				// 	}
+				// 	else
+				// 		st=0;					
+				// 	break;
 				case 2:
 					
 					buf[bi]=msg[i];
 					bsum+=buf[bi++];
-					if(bi==19)
+					if(bi==49)
 						st=3;
 					break;
 				case 3:
 					if(msg[i]==bsum)
                     {
                         buf[bi]=msg[i];
-                        if(buf[4] == 1)
-                        {
-                            printf("buf write video start\n");
-                            mknewfolder();
-                            writevideo = true; 
-                        }
-                        else if(buf[4] == 0)
-                        {
-                            if(writevideo == true)
-                            {
-                                bag.Swap(&ssdsbagbk);
-                                gpsbag.Swap(&gpsbagbk);
-                            }
-                            writevideo = false; 
-                        }
+                        // if((buf[2]==6)&&(buf[4] == 1))
+                        // {
+                        //     printf("write video start, sensor %d viewangle:%f\n", buf[3], fromuchartofloat(&buf[5]));
+                        //     mknewfolder();
+                        //     writevideo = true; 
+                        // }
+                        // else if((buf[2]==6)&&(buf[4] == 0))
+                        // {
+                        //     if(writevideo == true)
+                        //     {
+                        //         printf("write video stop, sensor %d viewangle:%f\n", buf[3], fromuchartofloat(&buf[5]));
+                        //         bag.Swap(&ssdsbagbk);
+                        //         gpsbag.Swap(&gpsbagbk);
+                        //     }
+                        //     writevideo = false; 
+                        // }
+                        // else if(msg[2]==8)
+                        // {
+                        //     if((msg_sum++)%1000==0)
+                        //         printf("az %f, el %f\n",fromuchartofloat(&msg[3])*180./PI, fromuchartofloat(&msg[7])*180./PI);
+                        // }
+                        // else if(buf[2]==1)
+                        // {
+                        //     if((msg_sum++)%50==0)
+                        //        printf("gyro az %f, el %f\n",fromuchartofloat(&buf[3])*6, fromuchartofloat(&buf[7])*6);
+                        // }
+                        // else if(buf[2]==2)
+                        // {
+
+                        //     if((msg_sum++)%100==0)
+                        //         printf("current ia %f, ie %f, oa %f, oe %f\n",fromuchartofloat(&buf[3]), fromuchartofloat(&buf[7]),fromuchartofloat(&buf[11]), fromuchartofloat(&buf[15]));
+                        // }
+                        // else if(buf[2]==3)
+                        // {
+                        //     if((msg_sum++)%100==0)
+                        //         printf("rd ia %f, ie %f, oa %f, oe %f\n",fromuchartofloat(&buf[3]), fromuchartofloat(&buf[7]),fromuchartofloat(&buf[11]), fromuchartofloat(&buf[15]));
+                        // }
 						++retsum;
                         if(writevideo)
-                            pbAddSSDSMsg(bag, tstamp, msg, len);
+                            pbAddSSDSMsg(bag, tstamp, buf, 50);
                     }
 					st=0;
 					bi=0;
@@ -446,12 +522,15 @@ static int CROP_TOP = 283;
 static int CROP_LEFT = 640;
 static int CROP_WIDTH = 640;
 static int CROP_HEIGHT = 514;
+static int writesize=640*480*2;
 
 std::string filename_res;
 
 static bool quit = false;
 
 int openedFile = -1;
+int backupFile = 0;
+std::queue<int> que;
 
 context_t ctx;
 
@@ -995,12 +1074,15 @@ prepare_buffers(context_t * ctx)
     input_params.width = CROP_WIDTH;
     input_params.height = CROP_HEIGHT;
     input_params.nvbuf_tag = NvBufferTag_NONE;
-    if (-1 == NvBufferCreateEx(&ctx->store_dmabuf_fd, &input_params))
-            ERROR_RETURN("Failed to create store_dmabuf_fd");
+    for(int i=0; i<20; ++i)
+    {
+        if (-1 == NvBufferCreateEx(&ctx->store_dmabuf_fd[i], &input_params))
+                ERROR_RETURN("Failed to create store_dmabuf_fd");
 
-    if (-1 == NvBufferMemMap(ctx->store_dmabuf_fd, 0, NvBufferMem_Read_Write,
-                        (void**)&ctx->pStoreStart))
-                ERROR_RETURN("Failed to map buffer");
+        if (-1 == NvBufferMemMap(ctx->store_dmabuf_fd[i], 0, NvBufferMem_Read_Write,
+                            (void**)&ctx->pStoreStart[i]))
+                    ERROR_RETURN("Failed to map buffer");
+    }
 
 
     input_params.colorFormat = get_nvbuff_color_fmt(V4L2_PIX_FMT_YUV420M);
@@ -1106,10 +1188,19 @@ start_capture(context_t * ctx, int core)
     // {
     // std::cout<<str<<std::endl;
     // }
+    set_affinity(core);
+
+    unsigned long wrtframecnt=0;
+    int index=0;
+    std::queue<int> que_backup;
+    que_backup.swap(que);
 
     struct sigaction sig_action;
     struct pollfd fds[1];
     NvBufferTransformParams cropTransParams, renderTransParams;
+
+    NvBufferSyncObj cropsyncobj;
+    NvBufferSyncObj dispsyncobj;
 
     // Ensure a clean shutdown if user types <ctrl+c>
     sig_action.sa_handler = signal_handle;
@@ -1137,6 +1228,7 @@ start_capture(context_t * ctx, int core)
     cropTransParams.transform_filter = NvBufferTransform_Filter_Smart;
     cropTransParams.src_rect = srcRect;
     cropTransParams.dst_rect = dstRect;
+    cropTransParams.session = NvBufferSessionCreate();
 
     renderTransParams.transform_flag = NVBUFFER_TRANSFORM_FILTER;
     renderTransParams.transform_filter = NvBufferTransform_Filter_Smart;
@@ -1146,6 +1238,8 @@ start_capture(context_t * ctx, int core)
 
     fds[0].fd = ctx->cam_fd;
     fds[0].events = POLLIN;
+
+    writesize = CROP_WIDTH*CROP_HEIGHT*2;
 
     
     std::string filePath;
@@ -1179,12 +1273,17 @@ start_capture(context_t * ctx, int core)
 
             ctx->frame++;
 
+            memset(&cropsyncobj,0,sizeof(NvBufferSyncObj));
+            memset(&dispsyncobj,0,sizeof(NvBufferSyncObj));
+            cropsyncobj.use_outsyncobj = 1;
+            dispsyncobj.use_outsyncobj = 1;
+
             // for(int i =0;i<ctx->g_buff[v4l2_buf.index].size/2;i++){
             //     unsigned char tmp= ctx->g_buff[v4l2_buf.index].start[i*2];
             //     ctx->g_buff[v4l2_buf.index].start[i*2]=ctx->g_buff[v4l2_buf.index].start[i*2+1];
             //     ctx->g_buff[v4l2_buf.index].start[i*2+1]=tmp;
             // }
-            for(int i =0;i<ctx->g_buff[v4l2_buf.index].size/4;i++){
+            //for(int i =0;i<ctx->g_buff[v4l2_buf.index].size/4;i++){
                 // unsigned char V= ctx->g_buff[v4l2_buf.index].start[i*4];
                 // unsigned char Y1= ctx->g_buff[v4l2_buf.index].start[i*4+1];
                 // unsigned char U= ctx->g_buff[v4l2_buf.index].start[i*4+2];
@@ -1193,20 +1292,32 @@ start_capture(context_t * ctx, int core)
                 // ctx->g_buff[v4l2_buf.index].start[i*4+1]=U;
                 // ctx->g_buff[v4l2_buf.index].start[i*4+2]=Y2;
                 // ctx->g_buff[v4l2_buf.index].start[i*4+3]=V;
-                unsigned char Y1= ctx->g_buff[v4l2_buf.index].start[i*4];
-                unsigned char U= ctx->g_buff[v4l2_buf.index].start[i*4+1];
-                unsigned char Y2= ctx->g_buff[v4l2_buf.index].start[i*4+2];
-                unsigned char V= ctx->g_buff[v4l2_buf.index].start[i*4+3];
-                ctx->g_buff[v4l2_buf.index].start[i*4]=V;
-                ctx->g_buff[v4l2_buf.index].start[i*4+1]=Y1;
-                ctx->g_buff[v4l2_buf.index].start[i*4+2]=U;
-                ctx->g_buff[v4l2_buf.index].start[i*4+3]=Y2;
-            }
+                // unsigned char Y1= ctx->g_buff[v4l2_buf.index].start[i*4];
+                // unsigned char U= ctx->g_buff[v4l2_buf.index].start[i*4+1];
+                // unsigned char Y2= ctx->g_buff[v4l2_buf.index].start[i*4+2];
+                // unsigned char V= ctx->g_buff[v4l2_buf.index].start[i*4+3];
+                // ctx->g_buff[v4l2_buf.index].start[i*4]=V;
+                // ctx->g_buff[v4l2_buf.index].start[i*4+1]=Y1;
+                // ctx->g_buff[v4l2_buf.index].start[i*4+2]=U;
+                // ctx->g_buff[v4l2_buf.index].start[i*4+3]=Y2;
+            //}
 
-            if (-1 == NvBufferTransform(ctx->g_buff[v4l2_buf.index].dmabuff_fd, ctx->render_dmabuf_fd,
-                            &renderTransParams))
+            if (-1 == NvBufferTransformAsync(ctx->g_buff[v4l2_buf.index].dmabuff_fd, ctx->render_dmabuf_fd,
+                            &renderTransParams,&dispsyncobj))
+                    ERROR_RETURN("Failed to convert the buffer");
+            if (-1 == NvBufferTransformAsync(ctx->g_buff[v4l2_buf.index].dmabuff_fd, ctx->store_dmabuf_fd[index],
+                            &cropTransParams, &cropsyncobj))
                     ERROR_RETURN("Failed to convert the buffer");
 
+            if (NvBufferSyncObjWait(&cropsyncobj.outsyncobj,
+                            NVBUFFER_SYNCPOINT_WAIT_INFINITE))
+                    ERROR_RETURN("Failed to convert the buffer for the sync");
+
+            if (NvBufferSyncObjWait(&dispsyncobj.outsyncobj,
+                            NVBUFFER_SYNCPOINT_WAIT_INFINITE))
+                    ERROR_RETURN("Failed to convert the buffer for the sync");
+
+            
             //   NvBufferParams params = {0};
             // if (-1 == NvBufferGetParams(ctx->render_dmabuf_fd, &params))
             //         ERROR_RETURN("Failed to get NvBuffer parameters");
@@ -1251,15 +1362,12 @@ start_capture(context_t * ctx, int core)
 
 
             ctx->renderer->render(ctx->render_dmabuf_fd);
+            memcpy(ctx->pStoreStart[index], ptr, 8);
 
-
-            if (-1 == NvBufferTransform(ctx->g_buff[v4l2_buf.index].dmabuff_fd, ctx->store_dmabuf_fd,
-                            &cropTransParams))
-                    ERROR_RETURN("Failed to convert the buffer");
-
-            
-
-            memcpy(ctx->pStoreStart, ptr, 8);
+            // for(int i=0;i<10;i++)
+            // {
+            //     printf("i:%d, --[%d],", i, ctx->pStoreStart[index][i]);
+            // }
 
             // if (ctx->frame == ctx->save_n_frame)
                 // save_frame_to_file(ctx, &v4l2_buf);
@@ -1288,6 +1396,7 @@ start_capture(context_t * ctx, int core)
             {
                 if(openedFile == -1 || GetFileSize(filePath) > 104857600*5 )
                 {
+                    wrtframecnt=0;
                     printf("open new file, openedFile =%d\n", openedFile);
                     std::time_t tt = std::chrono::system_clock::to_time_t (std::chrono::system_clock::now());
                     std::stringstream ss;
@@ -1299,7 +1408,8 @@ start_capture(context_t * ctx, int core)
 
                     if(openedFile != -1)
                     {
-                        close(openedFile);
+                        //close(openedFile);
+                        backupFile=openedFile;
                     }
 
                     openedFile = open(filePath.c_str(), O_CREAT | O_WRONLY | O_APPEND | O_TRUNC,
@@ -1307,15 +1417,16 @@ start_capture(context_t * ctx, int core)
 
                 }
 
-                int writesize = CROP_WIDTH*CROP_HEIGHT*2;
+                que.push(index++);
+                index=index%20;
                 
-                if (-1 == write(openedFile, ctx->pStoreStart,
-                            writesize))
-                {
-                    printf("write failed\n");
-                    close(openedFile);
-                    ERROR_RETURN("Failed to write frame into file");
-                }
+                // if (-1 == write(openedFile, ctx->pStoreStart,
+                //             writesize))
+                // {
+                //     printf("write failed\n");
+                //     close(openedFile);
+                //     ERROR_RETURN("Failed to write frame into file");
+                // }
             }
             else
             {
@@ -1371,7 +1482,9 @@ start_capture(context_t * ctx, int core)
 
 void serialTH1()
 {
-    int fd=init_serial("/dev/ttyTHS1", B921600, 8, "1", 'n');
+    set_affinity(1);
+    int fd=init_serial("/dev/ttyTHS1", B115200, 8, "1", 'n'); //DB9-2
+    // int fd=init_serial("/dev/ttyTHS1", B921600, 8, "1", 'n');
     //int fd=init_serial("/dev/ttyTHS0", B460800, 8, "1", 'e');
     assert(fd>=0);
     unsigned long sum=0, gsum=0, csum=0, wsum=0;	
@@ -1413,8 +1526,10 @@ void serialTH1()
 
 void serialTH0()
 {
+    set_affinity(0);
+    int fd=init_serial("/dev/ttyTHS0", B115200, 8, "1", 'e'); //DB9-1
+    // int fd=init_serial("/dev/ttyTHS0", B921600, 8, "1", 'e');
     // int fd=init_serial("/dev/ttyTHS1", B921600, 8, "1", 'n');
-    int fd=init_serial("/dev/ttyTHS0", B460800, 8, "1", 'e');
     assert(fd>=0);
     unsigned long sum=0, gsum=0, csum=0, wsum=0;	
     int maxSize=512;
@@ -1465,6 +1580,8 @@ main(int argc, char *argv[])
 
     filename_res = "-"+std::to_string(CROP_WIDTH)+"-"+std::to_string(CROP_HEIGHT);
 
+    
+
     // make a new directory
     std::vector<string> fileNames, dirs;
     showAllFiles(dataRootPath.c_str(), fileNames);
@@ -1499,6 +1616,12 @@ main(int argc, char *argv[])
     std::thread serialth0 = std::thread(serialTH0);
     serialth0.detach();
 
+    std::thread serialusb0 = std::thread(serialTH0);
+    serialth0.detach();
+
+    std::thread serialusb1 = std::thread(serialTH0);
+    serialth0.detach();
+
     
     int error = 0;
 
@@ -1509,12 +1632,33 @@ main(int argc, char *argv[])
     start_stream(&ctx);
 
     int core = 0;
-    std::thread videoth = std::thread(start_capture, &ctx, core);
+    std::thread videoth = std::thread(start_capture, &ctx, 5);
     
     videoth.detach();
 
     while(1)
     {
+        while((!que.empty())&&(openedFile!=-1))
+        {
+            int id=que.front();
+            que.pop();
+
+            if (-1 == write(openedFile, ctx.pStoreStart[id],
+                            writesize))
+                {
+                    printf("write failed\n");
+                    close(openedFile);
+                    ERROR_RETURN("Failed to write frame into file");
+                }
+
+
+
+        }
+        if(backupFile!=0)
+        {
+            close(backupFile);
+            backupFile=0;
+        }
         if(gpsbagbk.msgs_size() > 0)
         {
             std::fstream serialOutput;
@@ -1565,7 +1709,7 @@ main(int argc, char *argv[])
             serialOutput.close();
             ssdsbagbk.clear_msgs();
         }
-        usleep(100);
+        usleep(1);
     }
 
     return 0;

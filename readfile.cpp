@@ -85,13 +85,13 @@ int main(int argc, char **argv)
         // cv::Mat mt = cv::Mat(514,640,CV_8UC2, imgbuf);
         cv::Mat mt = cv::Mat(imgh,imgw,CV_8UC2, imgbuf);
         cv::Mat mtshow;
-        cv::cvtColor(mt, mtshow, cv::COLOR_YUV2RGB_UYVY);
+        cv::cvtColor(mt, mtshow, cv::COLOR_YUV2RGB_YVYU);
         // cv::imwrite("mtshow.png", mtshow);
 
         cv::putText(mtshow, timestr, cv::Point(20,20), cv::FONT_HERSHEY_COMPLEX, 0.5, cv::Scalar(0,255,0), 1);
 
         cv::imshow("1", mtshow);
-        cv::waitKey(33);
+        cv::waitKey(0);
 
 
     }
