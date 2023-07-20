@@ -1,0 +1,1 @@
+/usr/bin/c++     CMakeFiles/main.dir/test.pb.cpp.o CMakeFiles/main.dir/test.cpp.o  -o main  /usr/lib/aarch64-linux-gnu/libprotobuf.so -lpthread 

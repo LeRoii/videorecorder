@@ -15,6 +15,7 @@ uint64_t createtimestamp()
 }
 
 
+<<<<<<< HEAD
 void printts(uint64_t ts)
 {
 	typedef std::chrono::duration<int, std::ratio<86400>> Days;
@@ -56,10 +57,27 @@ int main(int argc, char* argv[])
 	// {
 	// 	std::cout<<"output file : "<< argv[1] << " is not found."<<std::endl;
 	// }
+=======
+
+int main(int argc, char* argv[])
+{
+	GOOGLE_PROTOBUF_VERIFY_VERSION;
+	if(argc<2){
+		std::cout<<"argc is too small"<<std::endl;
+		return 0;
+	}
+
+	std::fstream output(argv[1], std::ios::out | std::ios::binary);
+	if (!output)
+	{
+		std::cout<<"output file : "<< argv[1] << " is not found."<<std::endl;
+	}
+>>>>>>> main
 	
 	pb::serial_msg* pmsg;
 	pb::msg_bag bag;
 	
+<<<<<<< HEAD
 	// for(int i=0; i < 200*60*60 ; ++i)
 	// {
 	// 	pmsg = bag.add_msgs();
@@ -77,6 +95,25 @@ int main(int argc, char* argv[])
 	// output.write(start, 8);
 	// output.write(str.c_str(), str.length());
 	// output.close();
+=======
+	for(int i=0; i < 200*60*60 ; ++i)
+	{
+		pmsg = bag.add_msgs();
+		
+		pmsg->set_timestamp(createtimestamp());
+		pmsg->set_type(pb::serial_msg_Msg_type_GPS);
+		pmsg->set_len(90);
+		char str[90]={i%256};
+		pmsg->set_body(str,90);
+	}
+	
+	auto str=bag.SerializeAsString();
+	uint64_t len=str.size();
+	char* start=reinterpret_cast<char*>(&len);
+	output.write(start, 8);
+	output.write(str.c_str(), str.length());
+	output.close();
+>>>>>>> main
 	
 	std::fstream input(argv[1], std::ios::in | std::ios::binary);
 	if (!input)
@@ -106,6 +143,7 @@ int main(int argc, char* argv[])
 		auto type=msg.type();
 		auto len=msg.len();
 		auto body=msg.body();
+<<<<<<< HEAD
 		
 		printts(timestamp);
 		std::cout<<"msg.type is "<<type<<", msg.len is "<<len<<".\n";
@@ -115,6 +153,9 @@ int main(int argc, char* argv[])
 		    printf("\n");
 
 		
+=======
+		std::cout<<"msg.type is "<<type<<", msg.len is "<<len<<".\n";
+>>>>>>> main
 	
 	
 	}

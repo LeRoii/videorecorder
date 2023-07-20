@@ -49,14 +49,6 @@
 #include <sys/timeb.h>
 #include <signal.h>
 
-#include <fcntl.h>
-#include <sys/time.h>
-#include <stdint.h>
-#include <termios.h>
-#include <string.h>
-#include <assert.h>
-#include <string>
-
 #include "test.pb.h"
 
 
