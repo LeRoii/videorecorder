@@ -41,7 +41,7 @@
 #include <thread>
 #include <mutex>
 #include <pthread.h>
-#include <queue>
+
 
 #include <dirent.h>
 #include <sys/statfs.h>
@@ -73,7 +73,7 @@
 const int PB_GPS_MSG_SIZE = 200 * 1000 * 1;
 const int PB_SSDS_MSG_SIZE = 200 * 1000 * 1;
 
-bool writevideo = true;
+bool writevideo = false;
 
 std::string dataRootPath = "/home/nx/savedvideo/";
 std::string dataFullPath;
@@ -256,8 +256,7 @@ int pbAddSSDSMsg(pb::msg_bag &bag, uint64_t timestamp,  unsigned char* msg, int 
 
 int onRcvGPSMsg(unsigned char* msg, int len)
 {
-	// static unsigned char buf[200]={0x55,0xaa, 0x0};
-    static unsigned char buf[200]={0xA1, 0xFD, 0x02, 0x02, 0xDF}; //$GPFPD
+	static unsigned char buf[200]={0x55,0xaa, 0x0};
 	static unsigned char st=0;
 	static int bi=0;
 	static unsigned char bsum=0;
@@ -266,7 +265,7 @@ int onRcvGPSMsg(unsigned char* msg, int len)
 
 	int retsum=0;
 
-	if(len==18)
+	if(len==140)
 	{
 		//auto tstamp=createtimestamp();
 
@@ -360,8 +359,7 @@ float fromuchartofloat(unsigned char* src)
 int onRcvSSDSMsg(unsigned char* msg, int len)
 {
     // printf("onRcvSSDSMsg\n");
-    //static unsigned char buf[200]={0xCC,0x55, 0x0};
-    static unsigned char buf[200]={0xAA};
+    static unsigned char buf[200]={0xCC,0x55, 0x0};
 	static unsigned char st=0;
 	static int bi=0;
 	static unsigned char bsum=0;
@@ -372,37 +370,37 @@ int onRcvSSDSMsg(unsigned char* msg, int len)
 
     static pb::msg_bag bag;
 
-	if(len==50)
+	if(len==20)
 	{
 		//auto tstamp=createtimestamp();
 
         tstamp=createtimestamp();
-		if(msg[0]==0xAA)
+		if((msg[0]==0xCC)&&(msg[1]==0x55))
 		{
 			unsigned char sum=0;
-			for(int i=1;i <49; ++i)
+			for(int i=2;i <19; ++i)
 				sum+=msg[i];
-			if(msg[49]==sum)
+			if(msg[19]==sum)
             {
                 if(writevideo)
                     pbAddSSDSMsg(bag, tstamp, msg, len);
-                // if((msg[2]==6)&&(msg[4] == 1))
-                // {
-                //     printf("write video start, sensor %d viewangle:%f\n", msg[3], fromuchartofloat(&msg[5]));
-                //     mknewfolder();
-                //     writevideo = true; 
-                // }
-                // else if((msg[2]==6)&&(msg[4] == 0))
-                // {
+                if((msg[2]==6)&&(msg[4] == 1))
+                {
+                    printf("write video start, sensor %d viewangle:%f\n", msg[3], fromuchartofloat(&msg[5]));
+                    mknewfolder();
+                    writevideo = true; 
+                }
+                else if((msg[2]==6)&&(msg[4] == 0))
+                {
 
-                //     printf("write video stop, sensor %d viewangle:%f\n", msg[3], fromuchartofloat(&msg[5]));
-                //     if(writevideo == true)
-                //     {
-                //         bag.Swap(&ssdsbagbk);
-                //         gpsbag.Swap(&gpsbagbk);
-                //     }
-                //     writevideo = false; 
-                // }
+                    printf("write video stop, sensor %d viewangle:%f\n", msg[3], fromuchartofloat(&msg[5]));
+                    if(writevideo == true)
+                    {
+                        bag.Swap(&ssdsbagbk);
+                        gpsbag.Swap(&gpsbagbk);
+                    }
+                    writevideo = false; 
+                }
                 // else if(msg[2]==8)
                 // {
                 //     if((msg_sum++)%1000==0)
@@ -436,49 +434,49 @@ int onRcvSSDSMsg(unsigned char* msg, int len)
 			switch(st)
 			{
 				case 0:
-					if(msg[i]==0xAA)
+					if(msg[i]==0xCC)
 					{
-						st=2;
+						st=1;
 						bi=1;
                         tstamp = createtimestamp();
 					}
 					break;
-				// case 1:
-				// 	if(msg[i]==0x55)
-				// 	{
-				// 		st=2;
-				// 		bi=2;
-				// 	}
-				// 	else
-				// 		st=0;					
-				// 	break;
+				case 1:
+					if(msg[i]==0x55)
+					{
+						st=2;
+						bi=2;
+					}
+					else
+						st=0;					
+					break;
 				case 2:
 					
 					buf[bi]=msg[i];
 					bsum+=buf[bi++];
-					if(bi==49)
+					if(bi==19)
 						st=3;
 					break;
 				case 3:
 					if(msg[i]==bsum)
                     {
                         buf[bi]=msg[i];
-                        // if((buf[2]==6)&&(buf[4] == 1))
-                        // {
-                        //     printf("write video start, sensor %d viewangle:%f\n", buf[3], fromuchartofloat(&buf[5]));
-                        //     mknewfolder();
-                        //     writevideo = true; 
-                        // }
-                        // else if((buf[2]==6)&&(buf[4] == 0))
-                        // {
-                        //     if(writevideo == true)
-                        //     {
-                        //         printf("write video stop, sensor %d viewangle:%f\n", buf[3], fromuchartofloat(&buf[5]));
-                        //         bag.Swap(&ssdsbagbk);
-                        //         gpsbag.Swap(&gpsbagbk);
-                        //     }
-                        //     writevideo = false; 
-                        // }
+                        if((buf[2]==6)&&(buf[4] == 1))
+                        {
+                            printf("write video start, sensor %d viewangle:%f\n", buf[3], fromuchartofloat(&buf[5]));
+                            mknewfolder();
+                            writevideo = true; 
+                        }
+                        else if((buf[2]==6)&&(buf[4] == 0))
+                        {
+                            if(writevideo == true)
+                            {
+                                printf("write video stop, sensor %d viewangle:%f\n", buf[3], fromuchartofloat(&buf[5]));
+                                bag.Swap(&ssdsbagbk);
+                                gpsbag.Swap(&gpsbagbk);
+                            }
+                            writevideo = false; 
+                        }
                         // else if(msg[2]==8)
                         // {
                         //     if((msg_sum++)%1000==0)
@@ -502,7 +500,7 @@ int onRcvSSDSMsg(unsigned char* msg, int len)
                         // }
 						++retsum;
                         if(writevideo)
-                            pbAddSSDSMsg(bag, tstamp, buf, 50);
+                            pbAddSSDSMsg(bag, tstamp, buf, 20);
                     }
 					st=0;
 					bi=0;
@@ -522,7 +520,6 @@ static int CROP_TOP = 283;
 static int CROP_LEFT = 640;
 static int CROP_WIDTH = 640;
 static int CROP_HEIGHT = 514;
-static int writesize=640*480*2;
 
 std::string filename_res;
 
@@ -530,7 +527,6 @@ static bool quit = false;
 
 int openedFile = -1;
 int backupFile = 0;
-std::queue<int> que;
 
 context_t ctx;
 
@@ -1074,15 +1070,12 @@ prepare_buffers(context_t * ctx)
     input_params.width = CROP_WIDTH;
     input_params.height = CROP_HEIGHT;
     input_params.nvbuf_tag = NvBufferTag_NONE;
-    for(int i=0; i<20; ++i)
-    {
-        if (-1 == NvBufferCreateEx(&ctx->store_dmabuf_fd[i], &input_params))
-                ERROR_RETURN("Failed to create store_dmabuf_fd");
+    if (-1 == NvBufferCreateEx(&ctx->store_dmabuf_fd, &input_params))
+            ERROR_RETURN("Failed to create store_dmabuf_fd");
 
-        if (-1 == NvBufferMemMap(ctx->store_dmabuf_fd[i], 0, NvBufferMem_Read_Write,
-                            (void**)&ctx->pStoreStart[i]))
-                    ERROR_RETURN("Failed to map buffer");
-    }
+    if (-1 == NvBufferMemMap(ctx->store_dmabuf_fd, 0, NvBufferMem_Read_Write,
+                        (void**)&ctx->pStoreStart))
+                ERROR_RETURN("Failed to map buffer");
 
 
     input_params.colorFormat = get_nvbuff_color_fmt(V4L2_PIX_FMT_YUV420M);
@@ -1191,9 +1184,6 @@ start_capture(context_t * ctx, int core)
     set_affinity(core);
 
     unsigned long wrtframecnt=0;
-    int index=0;
-    std::queue<int> que_backup;
-    que_backup.swap(que);
 
     struct sigaction sig_action;
     struct pollfd fds[1];
@@ -1238,8 +1228,6 @@ start_capture(context_t * ctx, int core)
 
     fds[0].fd = ctx->cam_fd;
     fds[0].events = POLLIN;
-
-    writesize = CROP_WIDTH*CROP_HEIGHT*2;
 
     
     std::string filePath;
@@ -1302,22 +1290,10 @@ start_capture(context_t * ctx, int core)
                 // ctx->g_buff[v4l2_buf.index].start[i*4+3]=Y2;
             //}
 
-            if (-1 == NvBufferTransformAsync(ctx->g_buff[v4l2_buf.index].dmabuff_fd, ctx->render_dmabuf_fd,
-                            &renderTransParams,&dispsyncobj))
-                    ERROR_RETURN("Failed to convert the buffer");
-            if (-1 == NvBufferTransformAsync(ctx->g_buff[v4l2_buf.index].dmabuff_fd, ctx->store_dmabuf_fd[index],
-                            &cropTransParams, &cropsyncobj))
+            if (-1 == NvBufferTransform(ctx->g_buff[v4l2_buf.index].dmabuff_fd, ctx->render_dmabuf_fd,
+                            &renderTransParams))
                     ERROR_RETURN("Failed to convert the buffer");
 
-            if (NvBufferSyncObjWait(&cropsyncobj.outsyncobj,
-                            NVBUFFER_SYNCPOINT_WAIT_INFINITE))
-                    ERROR_RETURN("Failed to convert the buffer for the sync");
-
-            if (NvBufferSyncObjWait(&dispsyncobj.outsyncobj,
-                            NVBUFFER_SYNCPOINT_WAIT_INFINITE))
-                    ERROR_RETURN("Failed to convert the buffer for the sync");
-
-            
             //   NvBufferParams params = {0};
             // if (-1 == NvBufferGetParams(ctx->render_dmabuf_fd, &params))
             //         ERROR_RETURN("Failed to get NvBuffer parameters");
@@ -1362,12 +1338,15 @@ start_capture(context_t * ctx, int core)
 
 
             ctx->renderer->render(ctx->render_dmabuf_fd);
-            memcpy(ctx->pStoreStart[index], ptr, 8);
 
-            // for(int i=0;i<10;i++)
-            // {
-            //     printf("i:%d, --[%d],", i, ctx->pStoreStart[index][i]);
-            // }
+
+            if (-1 == NvBufferTransform(ctx->g_buff[v4l2_buf.index].dmabuff_fd, ctx->store_dmabuf_fd,
+                            &cropTransParams))
+                    ERROR_RETURN("Failed to convert the buffer");
+
+            
+
+            memcpy(ctx->pStoreStart, ptr, 8);
 
             // if (ctx->frame == ctx->save_n_frame)
                 // save_frame_to_file(ctx, &v4l2_buf);
@@ -1417,16 +1396,15 @@ start_capture(context_t * ctx, int core)
 
                 }
 
-                que.push(index++);
-                index=index%20;
+                int writesize = CROP_WIDTH*CROP_HEIGHT*2;
                 
-                // if (-1 == write(openedFile, ctx->pStoreStart,
-                //             writesize))
-                // {
-                //     printf("write failed\n");
-                //     close(openedFile);
-                //     ERROR_RETURN("Failed to write frame into file");
-                // }
+                if (-1 == write(openedFile, ctx->pStoreStart,
+                            writesize))
+                {
+                    printf("write failed\n");
+                    close(openedFile);
+                    ERROR_RETURN("Failed to write frame into file");
+                }
             }
             else
             {
@@ -1483,8 +1461,7 @@ start_capture(context_t * ctx, int core)
 void serialTH1()
 {
     set_affinity(1);
-    int fd=init_serial("/dev/ttyTHS1", B115200, 8, "1", 'n'); //DB9-2
-    // int fd=init_serial("/dev/ttyTHS1", B921600, 8, "1", 'n');
+    int fd=init_serial("/dev/ttyTHS1", B921600, 8, "1", 'n');
     //int fd=init_serial("/dev/ttyTHS0", B460800, 8, "1", 'e');
     assert(fd>=0);
     unsigned long sum=0, gsum=0, csum=0, wsum=0;	
@@ -1527,9 +1504,8 @@ void serialTH1()
 void serialTH0()
 {
     set_affinity(0);
-    int fd=init_serial("/dev/ttyTHS0", B115200, 8, "1", 'e'); //DB9-1
-    // int fd=init_serial("/dev/ttyTHS0", B921600, 8, "1", 'e');
     // int fd=init_serial("/dev/ttyTHS1", B921600, 8, "1", 'n');
+    int fd=init_serial("/dev/ttyTHS0", B921600, 8, "1", 'e');
     assert(fd>=0);
     unsigned long sum=0, gsum=0, csum=0, wsum=0;	
     int maxSize=512;
@@ -1616,12 +1592,6 @@ main(int argc, char *argv[])
     std::thread serialth0 = std::thread(serialTH0);
     serialth0.detach();
 
-    std::thread serialusb0 = std::thread(serialTH0);
-    serialth0.detach();
-
-    std::thread serialusb1 = std::thread(serialTH0);
-    serialth0.detach();
-
     
     int error = 0;
 
@@ -1638,22 +1608,6 @@ main(int argc, char *argv[])
 
     while(1)
     {
-        while((!que.empty())&&(openedFile!=-1))
-        {
-            int id=que.front();
-            que.pop();
-
-            if (-1 == write(openedFile, ctx.pStoreStart[id],
-                            writesize))
-                {
-                    printf("write failed\n");
-                    close(openedFile);
-                    ERROR_RETURN("Failed to write frame into file");
-                }
-
-
-
-        }
         if(backupFile!=0)
         {
             close(backupFile);
@@ -1709,7 +1663,7 @@ main(int argc, char *argv[])
             serialOutput.close();
             ssdsbagbk.clear_msgs();
         }
-        usleep(1);
+        usleep(100);
     }
 
     return 0;

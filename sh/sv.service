@@ -1,0 +1,10 @@
+[Unit]
+Description=launch sv sh
+
+[Service]
+Type=simple
+ExecStart=/home/nx/code/205videorecorder/savevideo.sh
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
